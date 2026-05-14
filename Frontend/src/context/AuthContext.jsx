@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useMemo, useState } from 'react'
 import api from '../api/axios.js'
 
