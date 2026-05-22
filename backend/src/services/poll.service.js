@@ -1,36 +1,52 @@
 import prisma from "../config/prisma.js";
 import slugify from "slugify";
-
-const getPollInclude = (includeResponses = false) => ({
-    questions: {
-        orderBy: { order: "asc" },
-        include: {
-            options: {
-                orderBy: { order: "asc" },
-            },
-            responses: includeResponses ? { select: { id: true } } : false,
-        },
-    },
-    creator: {
-        select: { id: true, name: true, email: true },
-    },
-    responses: includeResponses ? { select: { id: true } } : false,
-});
+import ApiError from "../utils/ApiError.js";
+import logger from "../utils/logger.js";
+import { getPollInclude, pollQuestionInclude, userPollInclude } from "./pollInclude.service.js";
 
 const normalizeExpiry = (expiresAt) => {
     if (!expiresAt) return null;
 
     const date = new Date(expiresAt);
     if (Number.isNaN(date.getTime())) {
-        throw new Error("Invalid expiry date");
+        throw new ApiError(400, "Invalid expiry date");
     }
 
     if (date <= new Date()) {
-        throw new Error("Expiry time must be in the future");
+        throw new ApiError(400, "Expiry time must be in the future");
     }
 
     return date;
 };
+
+export const verifyPollOwnership = async (pollId, userId, include = {}) => {
+    const poll = await prisma.poll.findUnique({
+        where: { id: pollId },
+        include,
+    });
+
+    if (!poll) {
+        throw new ApiError(404, "Poll not found");
+    }
+
+    if (poll.createdBy !== userId) {
+        throw new ApiError(403, "Unauthorized - Not poll creator");
+    }
+
+    return poll;
+};
+
+const questionCreateInput = (questions) => questions.map((question, qIndex) => ({
+    text: question.text,
+    isMandatory: Boolean(question.isMandatory),
+    order: qIndex,
+    options: {
+        create: question.options.map((option, oIndex) => ({
+            text: option.text,
+            order: oIndex,
+        })),
+    },
+}));
 
 export const createPoll = async (userId, pollData) => {
     try {
@@ -55,35 +71,16 @@ export const createPoll = async (userId, pollData) => {
                 expiresAt: normalizeExpiry(expiresAt),
                 slug: uniqueSlug,
                 createdBy: userId,
-                questions: {
-                    create: questions.map((question, qIndex) => ({
-                        text: question.text,
-                        isMandatory: Boolean(question.isMandatory),
-                        order: qIndex,
-                        options: {
-                            create: question.options.map((option, oIndex) => ({
-                                text: option.text,
-                                order: oIndex,
-                            })),
-                        },
-                    })),
-                },
+                questions: { create: questionCreateInput(questions) },
             },
             include: {
-                questions: {
-                    orderBy: { order: "asc" },
-                    include: {
-                        options: {
-                            orderBy: { order: "asc" },
-                        },
-                    },
-                },
+                questions: pollQuestionInclude,
             },
         });
 
         return poll;
     } catch (error) {
-        console.error("Error creating poll:", error);
+        logger.error("Error creating poll", error);
         throw error;
     }
 };
@@ -97,7 +94,7 @@ export const getPollBySlug = async (slug, includeResponses = false) => {
 
         return poll;
     } catch (error) {
-        console.error("Error getting poll:", error);
+        logger.error("Error getting poll by slug", error);
         throw error;
     }
 };
@@ -111,7 +108,7 @@ export const getPollById = async (id, includeResponses = false) => {
 
         return poll;
     } catch (error) {
-        console.error("Error getting poll:", error);
+        logger.error("Error getting poll by id", error);
         throw error;
     }
 };
@@ -120,36 +117,22 @@ export const getUserPolls = async (userId) => {
     try {
         const polls = await prisma.poll.findMany({
             where: { createdBy: userId },
-            include: {
-                questions: {
-                    orderBy: { order: "asc" },
-                    include: {
-                        options: {
-                            orderBy: { order: "asc" },
-                        },
-                    },
-                },
-                _count: {
-                    select: { responses: true }
-                }
-            },
+            include: userPollInclude,
             orderBy: { createdAt: "desc" },
         });
 
         return polls;
     } catch (error) {
-        console.error("Error getting user polls:", error);
+        logger.error("Error getting user polls", error);
         throw error;
     }
 };
 
 export const updatePoll = async (pollId, userId, pollData) => {
     try {
-        // Verify ownership
-        const poll = await prisma.poll.findUnique({ where: { id: pollId } });
-        if (!poll || poll.createdBy !== userId) {
-            throw new Error("Unauthorized - Not poll creator");
-        }
+        const poll = await verifyPollOwnership(pollId, userId, {
+            _count: { select: { responses: true } },
+        });
 
         const data = {};
         if (Object.prototype.hasOwnProperty.call(pollData, "title")) data.title = pollData.title;
@@ -157,71 +140,56 @@ export const updatePoll = async (pollId, userId, pollData) => {
         if (Object.prototype.hasOwnProperty.call(pollData, "isAnonymous")) data.isAnonymous = pollData.isAnonymous;
         if (Object.prototype.hasOwnProperty.call(pollData, "expiresAt")) data.expiresAt = normalizeExpiry(pollData.expiresAt);
 
+        if (Object.prototype.hasOwnProperty.call(pollData, "questions")) {
+            if (poll._count.responses > 0) {
+                throw new ApiError(400, "Questions cannot be edited after responses are submitted");
+            }
+
+            data.questions = {
+                deleteMany: {},
+                create: questionCreateInput(pollData.questions),
+            };
+        }
+
         const updatedPoll = await prisma.poll.update({
             where: { id: pollId },
             data,
-            include: {
-                questions: {
-                    orderBy: { order: "asc" },
-                    include: {
-                        options: {
-                            orderBy: { order: "asc" },
-                        },
-                    },
-                },
-            },
+            include: getPollInclude(),
         });
 
         return updatedPoll;
     } catch (error) {
-        console.error("Error updating poll:", error);
+        logger.error("Error updating poll", error);
         throw error;
     }
 };
 
 export const publishPoll = async (pollId, userId) => {
     try {
-        // Verify ownership
-        const poll = await prisma.poll.findUnique({ where: { id: pollId } });
-        if (!poll || poll.createdBy !== userId) {
-            throw new Error("Unauthorized - Not poll creator");
-        }
+        await verifyPollOwnership(pollId, userId);
 
         const updatedPoll = await prisma.poll.update({
             where: { id: pollId },
             data: { isPublished: true },
-            include: {
-                questions: {
-                    orderBy: { order: "asc" },
-                    include: {
-                        options: {
-                            orderBy: { order: "asc" },
-                        },
-                    },
-                },
-            },
+            include: { questions: pollQuestionInclude },
         });
 
         return updatedPoll;
     } catch (error) {
-        console.error("Error publishing poll:", error);
+        logger.error("Error publishing poll", error);
         throw error;
     }
 };
 
 export const deletePoll = async (pollId, userId) => {
     try {
-        // Verify ownership
-        const poll = await prisma.poll.findUnique({ where: { id: pollId } });
-        if (!poll || poll.createdBy !== userId) {
-            throw new Error("Unauthorized - Not poll creator");
-        }
+        await verifyPollOwnership(pollId, userId);
 
         await prisma.poll.delete({ where: { id: pollId } });
 
         return { success: true };
     } catch (error) {
-        console.error("Error deleting poll:", error);
+        logger.error("Error deleting poll", error);
         throw error;
     }
 };

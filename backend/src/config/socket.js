@@ -1,5 +1,6 @@
 import { Server } from "socket.io";
 import { corsOptions } from "./cors.js";
+import { registerPollSocketHandlers } from "../sockets/poll.socket.js";
 
 let io;
 
@@ -8,21 +9,7 @@ export const initSocket = (server) => {
         cors: corsOptions,
     });
 
-    io.on("connection", (socket) => {
-        console.log("User connected:", socket.id);
-
-        socket.on("join-poll", (pollId) => {
-            socket.join(`poll-${pollId}`);
-        });
-
-        socket.on("leave-poll", (pollId) => {
-            socket.leave(`poll-${pollId}`);
-        });
-
-        socket.on("disconnect", () => {
-            console.log("User disconnected:", socket.id);
-        });
-    });
+    io.on("connection", registerPollSocketHandlers);
 
     return io;
 };

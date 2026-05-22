@@ -7,7 +7,7 @@ const statusClass = {
   Expired: 'bg-amber-50 text-amber-700 ring-amber-200',
 }
 
-export default function PollCard({ poll, onPublish, onCopied }) {
+export default function PollCard({ poll, onPublish, onDelete, onCopied }) {
   const status = getPollStatus(poll)
 
   const copyLink = async () => {
@@ -54,6 +54,12 @@ export default function PollCard({ poll, onPublish, onCopied }) {
           >
             Analytics
           </Link>
+          <Link
+            to={`/edit/${poll.id}`}
+            className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          >
+            Edit
+          </Link>
           {!poll.isPublished && (
             <button
               type="button"
@@ -63,6 +69,13 @@ export default function PollCard({ poll, onPublish, onCopied }) {
               Publish
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => onDelete(poll)}
+            className="rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+          >
+            Delete
+          </button>
         </div>
       </div>
     </article>

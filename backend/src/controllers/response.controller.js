@@ -1,29 +1,14 @@
 import * as responseService from "../services/response.service.js";
 import * as pollService from "../services/poll.service.js";
 import { emitPollUpdate } from "../config/socket.js";
+import asyncHandler from "../utils/asyncHandler.js";
+import { buildAnonymousFingerprint } from "../middlewares/security.middleware.js";
 
-const getErrorStatus = (error) => {
-    const message = error.message || "";
-    if (message.includes("not found")) return 404;
-    if (message.includes("Login is required")) return 401;
-    if (
-        message.includes("expired") ||
-        message.includes("required") ||
-        message.includes("Mandatory") ||
-        message.includes("Invalid") ||
-        message.includes("already")
-    ) {
-        return 400;
-    }
-    if (message.includes("published yet")) return 403;
-    return 500;
-};
-
-export const submitResponse = async (req, res) => {
-    try {
+export const submitResponse = asyncHandler(async (req, res) => {
         const { slug } = req.params;
         const { answers } = req.body;
         const respondentId = req.userId || null; // null if anonymous
+        const anonymousFingerprint = buildAnonymousFingerprint(req);
 
         const poll = await pollService.getPollBySlug(slug);
         if (!poll) {
@@ -33,7 +18,7 @@ export const submitResponse = async (req, res) => {
             });
         }
 
-        const response = await responseService.submitResponse(slug, answers, respondentId);
+        const response = await responseService.submitResponse(slug, answers, respondentId, anonymousFingerprint);
         const analytics = await responseService.getPublicPollAnalytics(response.pollId);
 
         emitPollUpdate(response.pollId, "response-update", {
@@ -46,17 +31,9 @@ export const submitResponse = async (req, res) => {
             message: "Response submitted successfully",
             response,
         });
-    } catch (error) {
-        console.error("Error submitting response:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const getPublicResults = async (req, res) => {
-    try {
+export const getPublicResults = asyncHandler(async (req, res) => {
         const { slug } = req.params;
 
         const poll = await pollService.getPollBySlug(slug);
@@ -80,11 +57,4 @@ export const getPublicResults = async (req, res) => {
             success: true,
             analytics,
         });
-    } catch (error) {
-        console.error("Error getting results:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});

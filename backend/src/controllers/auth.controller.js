@@ -1,97 +1,31 @@
-import bcrypt from "bcrypt";
-import prisma from "../config/prisma.js"
+import * as authService from "../services/auth.service.js";
 import generateToken from "../utils/generateToken.js";
 import { authCookieOptions, clearAuthCookieOptions } from "../config/cookies.js";
+import asyncHandler from "../utils/asyncHandler.js";
 
-export const register = async (req, res) => {
-    try {
-        const { name, email, password } = req.body;
-        const existingUser = await prisma.user.findUnique({
-            where: {
-                email,
-            },
-        });
-        if (existingUser) {
-            return res.status(409).json({
-                success: false,
-                message: "User already exists"
-            });
-        }
-        const hashedPassword = await bcrypt.hash(password, 10);
+export const register = asyncHandler(async (req, res) => {
+    const user = await authService.registerUser(req.body);
+    const token = generateToken(user.id);
+    res.cookie("token", token, authCookieOptions);
 
-        const user = await prisma.user.create({
-            data: {
-                name,
-                email,
-                password: hashedPassword,
-            },
-        });
+    return res.status(201).json({
+        success: true,
+        message: "User registered successfully",
+        user,
+    });
+});
 
-        const token = generateToken(user.id);
-        res.cookie("token", token, authCookieOptions);
+export const login = asyncHandler(async (req, res) => {
+    const user = await authService.loginUser(req.body);
+    const token = generateToken(user.id);
+    res.cookie("token", token, authCookieOptions);
 
-        return res.status(201).json({
-            success: true,
-            message: "User registered successfully",
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-            },
-        });
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
-    }
-};
-
-export const login = async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        const user = await prisma.user.findUnique({
-            where: {
-                email,
-            },
-        });
-        if (!user) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid credentials"
-            });
-        }
-
-        const isMatch = await bcrypt.compare(
-            password,
-            user.password
-        );
-        if (!isMatch) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid credentials",
-            });
-        }
-        const token = generateToken(user.id);
-        res.cookie("token", token, authCookieOptions);
-        return res.status(200).json({
-            success: true,
-            message: "Login successful",
-            user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-            }
-        });
-    } catch (err) {
-        console.log(err);
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
-    }
-};
+    return res.status(200).json({
+        success: true,
+        message: "Login successful",
+        user,
+    });
+});
 
 export const logout = async (req, res) => {
     res.clearCookie("token", clearAuthCookieOptions);
@@ -101,33 +35,11 @@ export const logout = async (req, res) => {
     });
 };
 
-export const getMe = async (req, res) => {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { id: req.userId },
-            select: {
-                id: true,
-                name: true,
-                email: true,
-            },
-        });
+export const getMe = asyncHandler(async (req, res) => {
+    const user = await authService.getUserById(req.userId);
 
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: "User not found",
-            });
-        }
-
-        return res.status(200).json({
-            success: true,
-            user,
-        });
-    } catch (error) {
-        console.log(error);
-        return res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
-    }
-};
+    return res.status(200).json({
+        success: true,
+        user,
+    });
+});

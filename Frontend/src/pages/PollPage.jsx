@@ -1,10 +1,20 @@
-import { useContext, useEffect, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import api from '../api/axios.js'
 import QuestionResults from '../components/charts/QuestionResults.jsx'
-import { SocketContext } from '../context/SocketContext.jsx'
+import { SocketContext } from '../context/socket-context.js'
 import { useAuth } from '../hooks/useAuth.js'
 import { formatDate } from '../utils/format.js'
+
+const getAnonymousId = () => {
+  const key = 'pulsepoll_anonymous_id'
+  const existing = window.localStorage.getItem(key)
+  if (existing) return existing
+
+  const id = crypto.randomUUID()
+  window.localStorage.setItem(key, id)
+  return id
+}
 
 export default function PollPage() {
   const { slug } = useParams()
@@ -15,6 +25,8 @@ export default function PollPage() {
   const [publicResults, setPublicResults] = useState(null)
   const [answers, setAnswers] = useState({})
   const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
+  const submittingRef = useRef(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
 
@@ -45,24 +57,41 @@ export default function PollPage() {
 
   const handleSubmit = async (event) => {
     event.preventDefault()
+    if (submittingRef.current) return
+    submittingRef.current = true
     setError('')
+
+    const submittedKey = `pulsepoll_submitted_${slug}`
+    if (poll.isAnonymous && window.localStorage.getItem(submittedKey)) {
+      setError('You have already submitted a response for this poll.')
+      submittingRef.current = false
+      return
+    }
 
     const missingQuestion = poll.questions.find((question) => question.isMandatory && !answers[question.id])
     if (missingQuestion) {
       setError(`Please answer: ${missingQuestion.text}`)
+      submittingRef.current = false
       return
     }
 
     try {
+      setSubmitting(true)
       await api.post(`/responses/${slug}/submit`, {
         answers: Object.entries(answers).map(([questionId, selectedOptionId]) => ({
           questionId,
           selectedOptionId,
         })),
+      }, {
+        headers: poll.isAnonymous ? { 'X-Anonymous-Id': getAnonymousId() } : undefined,
       })
+      if (poll.isAnonymous) window.localStorage.setItem(submittedKey, 'true')
       setSubmitted(true)
     } catch (err) {
       setError(err.message)
+    } finally {
+      submittingRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -137,8 +166,12 @@ export default function PollPage() {
         </div>
 
         {error && <p className="mt-5 rounded-md bg-red-50 px-3 py-2 text-sm font-medium text-red-700">{error}</p>}
-        <button className="mt-6 w-full rounded-md bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800">
-          Submit feedback
+        <button
+          type="submit"
+          disabled={submitting}
+          className="mt-6 w-full rounded-md bg-slate-950 px-4 py-2.5 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+        >
+          {submitting ? 'Submitting...' : 'Submit feedback'}
         </button>
       </form>
     </section>

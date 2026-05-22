@@ -27,6 +27,7 @@ export const updatePollSchema = z.object({
     description: z.string().trim().max(1000).optional(),
     isAnonymous: z.boolean().optional(),
     expiresAt: dateString.optional().nullable(),
+    questions: createPollSchema.shape.questions.optional(),
 });
 
 export const publishPollSchema = z.object({

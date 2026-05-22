@@ -1,36 +1,28 @@
 import prisma from "../config/prisma.js";
-import { isPollExpired } from "./poll.service.js";
+import { isPollExpired, verifyPollOwnership } from "./poll.service.js";
+import ApiError from "../utils/ApiError.js";
+import logger from "../utils/logger.js";
+import { pollQuestionInclude } from "./pollInclude.service.js";
 
-const pollAnalyticsInclude = {
-    questions: {
-        orderBy: { order: "asc" },
-        include: {
-            options: {
-                orderBy: { order: "asc" },
-            },
-        },
-    },
-    responses: {
-        include: {
-            questionResponses: true,
-            respondent: {
-                select: { id: true, name: true, email: true },
-            },
-        },
-        orderBy: { createdAt: "desc" },
-    },
-};
-
-const buildAnalytics = (poll) => {
-    const totalResponses = poll.responses.length;
+const buildAnalytics = ({
+    poll,
+    totalResponses,
+    totalAnswered,
+    authenticatedResponses,
+    latestResponseAt,
+    answerCountsByQuestion,
+    optionCounts,
+    responseTrend,
+}) => {
     const totalQuestions = poll.questions.length;
     const mandatoryQuestionCount = poll.questions.filter((question) => question.isMandatory).length;
-    const totalAnswered = poll.responses.reduce(
-        (sum, response) => sum + response.questionResponses.length,
-        0
-    );
     const possibleAnswers = totalResponses * totalQuestions;
-    const authenticatedResponses = poll.responses.filter((response) => response.respondentId).length;
+    const optionCountMap = new Map(
+        optionCounts.map((item) => [`${item.questionId}:${item.selectedOptionId}`, item._count._all])
+    );
+    const questionAnswerCountMap = new Map(
+        answerCountsByQuestion.map((item) => [item.questionId, item._count._all])
+    );
 
     return {
         totalResponses,
@@ -54,17 +46,14 @@ const buildAnalytics = (poll) => {
             averageCompletionRate: possibleAnswers
                 ? Number(((totalAnswered / possibleAnswers) * 100).toFixed(2))
                 : 0,
-            latestResponseAt: poll.responses[0]?.createdAt || null,
+            latestResponseAt,
         },
+        responseTrend,
         questions: poll.questions.map((question) => {
-            const answeredCount = poll.responses.filter((response) =>
-                response.questionResponses.some((answer) => answer.questionId === question.id)
-            ).length;
+            const answeredCount = questionAnswerCountMap.get(question.id) || 0;
 
             const options = question.options.map((option) => {
-                const count = poll.responses.filter((response) =>
-                    response.questionResponses.some((answer) => answer.selectedOptionId === option.id)
-                ).length;
+                const count = optionCountMap.get(`${question.id}:${option.id}`) || 0;
 
                 return {
                     id: option.id,
@@ -91,61 +80,127 @@ const buildAnalytics = (poll) => {
 const getPollForAnalytics = async (pollId) => {
     return prisma.poll.findUnique({
         where: { id: pollId },
-        include: pollAnalyticsInclude,
+        include: {
+            questions: pollQuestionInclude,
+        },
     });
 };
 
-export const submitResponse = async (pollSlug, answers, respondentId = null) => {
+const getAggregatedAnalytics = async (poll) => {
+    const [
+        totalResponses,
+        authenticatedResponses,
+        totalAnswered,
+        latestResponse,
+        answerCountsByQuestion,
+        optionCounts,
+        responseTrendRows,
+    ] = await Promise.all([
+        prisma.response.count({ where: { pollId: poll.id } }),
+        prisma.response.count({
+            where: {
+                pollId: poll.id,
+                respondentId: { not: null },
+            },
+        }),
+        prisma.questionResponse.count({
+            where: {
+                response: { pollId: poll.id },
+            },
+        }),
+        prisma.response.findFirst({
+            where: { pollId: poll.id },
+            orderBy: { createdAt: "desc" },
+            select: { createdAt: true },
+        }),
+        prisma.questionResponse.groupBy({
+            by: ["questionId"],
+            where: {
+                response: { pollId: poll.id },
+            },
+            _count: { _all: true },
+        }),
+        prisma.questionResponse.groupBy({
+            by: ["questionId", "selectedOptionId"],
+            where: {
+                response: { pollId: poll.id },
+            },
+            _count: { _all: true },
+        }),
+        prisma.$queryRaw`
+            SELECT DATE_TRUNC('day', "createdAt")::date AS day, COUNT(*)::int AS count
+            FROM "Response"
+            WHERE "pollId" = ${poll.id}
+            GROUP BY day
+            ORDER BY day ASC
+        `,
+    ]);
+
+    return buildAnalytics({
+        poll,
+        totalResponses,
+        totalAnswered,
+        authenticatedResponses,
+        latestResponseAt: latestResponse?.createdAt || null,
+        answerCountsByQuestion,
+        optionCounts,
+        responseTrend: responseTrendRows.map((item) => ({
+            date: item.day instanceof Date ? item.day.toISOString().slice(0, 10) : String(item.day).slice(0, 10),
+            count: Number(item.count),
+        })),
+    });
+};
+
+export const submitResponse = async (pollSlug, answers, respondentId = null, anonymousFingerprint = null) => {
     try {
         const poll = await prisma.poll.findUnique({
             where: { slug: pollSlug },
             include: {
-                questions: {
-                    include: { options: true },
-                },
+                questions: pollQuestionInclude,
             },
         });
 
         if (!poll) {
-            throw new Error("Poll not found");
+            throw new ApiError(404, "Poll not found");
         }
 
         if (poll.isPublished) {
-            throw new Error("Poll results are already published");
+            throw new ApiError(400, "Poll results are already published");
         }
 
         if (isPollExpired(poll)) {
-            throw new Error("Poll has expired");
+            throw new ApiError(400, "Poll has expired");
         }
 
         if (!poll.isAnonymous && !respondentId) {
-            throw new Error("Login is required to submit this poll");
+            throw new ApiError(401, "Login is required to submit this poll");
         }
 
         const storedRespondentId = poll.isAnonymous ? null : respondentId;
+        const storedAnonymousFingerprint = poll.isAnonymous ? anonymousFingerprint : null;
         const answerList = Array.isArray(answers) ? answers : [];
         const answeredQuestionIds = answerList.map((answer) => answer.questionId);
         const uniqueAnsweredQuestionIds = new Set(answeredQuestionIds);
 
         if (uniqueAnsweredQuestionIds.size !== answeredQuestionIds.length) {
-            throw new Error("Each question can only be answered once");
+            throw new ApiError(400, "Each question can only be answered once");
         }
 
         for (const question of poll.questions) {
             if (question.isMandatory && !uniqueAnsweredQuestionIds.has(question.id)) {
-                throw new Error(`Mandatory question "${question.text}" must be answered`);
+                throw new ApiError(400, `Mandatory question "${question.text}" must be answered`);
             }
         }
 
         for (const answer of answerList) {
             const question = poll.questions.find((item) => item.id === answer.questionId);
             if (!question) {
-                throw new Error(`Question ${answer.questionId} not found`);
+                throw new ApiError(404, `Question ${answer.questionId} not found`);
             }
 
             const option = question.options.find((item) => item.id === answer.selectedOptionId);
             if (!option) {
-                throw new Error(`Invalid option for question ${answer.questionId}`);
+                throw new ApiError(400, `Invalid option for question ${answer.questionId}`);
             }
         }
 
@@ -158,47 +213,67 @@ export const submitResponse = async (pollSlug, answers, respondentId = null) => 
             });
 
             if (existingResponse) {
-                throw new Error("You have already submitted a response for this poll");
+                throw new ApiError(400, "You have already submitted a response for this poll");
             }
         }
 
-        return prisma.response.create({
-            data: {
-                pollId: poll.id,
-                respondentId: storedRespondentId,
-                questionResponses: {
-                    create: answerList.map((answer) => ({
-                        questionId: answer.questionId,
-                        selectedOptionId: answer.selectedOptionId,
-                    })),
+        if (storedAnonymousFingerprint) {
+            const existingResponse = await prisma.response.findFirst({
+                where: {
+                    pollId: poll.id,
+                    anonymousFingerprint: storedAnonymousFingerprint,
                 },
-            },
-            include: {
-                questionResponses: {
-                    include: {
-                        question: true,
-                        selectedOption: true,
+            });
+
+            if (existingResponse) {
+                throw new ApiError(400, "You have already submitted a response for this poll");
+            }
+        }
+
+        try {
+            return await prisma.response.create({
+                data: {
+                    pollId: poll.id,
+                    respondentId: storedRespondentId,
+                    anonymousFingerprint: storedAnonymousFingerprint,
+                    questionResponses: {
+                        create: answerList.map((answer) => ({
+                            questionId: answer.questionId,
+                            selectedOptionId: answer.selectedOptionId,
+                        })),
                     },
                 },
-            },
-        });
+                include: {
+                    questionResponses: {
+                        include: {
+                            question: true,
+                            selectedOption: true,
+                        },
+                    },
+                },
+            });
+        } catch (error) {
+            if (error.code === "P2002") {
+                throw new ApiError(400, "You have already submitted a response for this poll");
+            }
+
+            throw error;
+        }
     } catch (error) {
-        console.error("Error submitting response:", error);
+        logger.error("Error submitting response", error);
         throw error;
     }
 };
 
 export const getPollAnalytics = async (pollId, userId) => {
     try {
-        const poll = await getPollForAnalytics(pollId);
+        const poll = await verifyPollOwnership(pollId, userId, {
+            questions: pollQuestionInclude,
+        });
 
-        if (!poll || poll.createdBy !== userId) {
-            throw new Error("Unauthorized - Not poll creator");
-        }
-
-        return buildAnalytics(poll);
+        return getAggregatedAnalytics(poll);
     } catch (error) {
-        console.error("Error getting poll analytics:", error);
+        logger.error("Error getting poll analytics", error);
         throw error;
     }
 };
@@ -208,22 +283,19 @@ export const getPublicPollAnalytics = async (pollId) => {
         const poll = await getPollForAnalytics(pollId);
 
         if (!poll) {
-            throw new Error("Poll not found");
+            throw new ApiError(404, "Poll not found");
         }
 
-        return buildAnalytics(poll);
+        return getAggregatedAnalytics(poll);
     } catch (error) {
-        console.error("Error getting public poll analytics:", error);
+        logger.error("Error getting public poll analytics", error);
         throw error;
     }
 };
 
 export const getPollResponses = async (pollId, userId) => {
     try {
-        const poll = await prisma.poll.findUnique({ where: { id: pollId } });
-        if (!poll || poll.createdBy !== userId) {
-            throw new Error("Unauthorized - Not poll creator");
-        }
+        const poll = await verifyPollOwnership(pollId, userId);
 
         const responses = await prisma.response.findMany({
             where: { pollId },
@@ -245,7 +317,7 @@ export const getPollResponses = async (pollId, userId) => {
 
         return responses;
     } catch (error) {
-        console.error("Error getting poll responses:", error);
+        logger.error("Error getting poll responses", error);
         throw error;
     }
 };

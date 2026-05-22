@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import ApiError from "../utils/ApiError.js";
 
 const getTokenFromRequest = (req) => {
     const bearerToken = req.headers.authorization?.startsWith("Bearer ")
@@ -13,20 +14,14 @@ const authMiddleware = (req, res, next) => {
         const token = getTokenFromRequest(req);
         
         if (!token) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized - No token provided"
-            });
+            throw new ApiError(401, "Unauthorized - No token provided");
         }
 
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.userId = decoded.userId;
         next();
     } catch (error) {
-        return res.status(401).json({
-            success: false,
-            message: "Unauthorized - Invalid token"
-        });
+        next(error instanceof ApiError ? error : new ApiError(401, "Unauthorized - Invalid token"));
     }
 };
 

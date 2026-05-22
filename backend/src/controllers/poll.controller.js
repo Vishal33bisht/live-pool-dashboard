@@ -1,17 +1,9 @@
 import * as pollService from "../services/poll.service.js";
 import * as responseService from "../services/response.service.js";
 import { emitPollUpdate } from "../config/socket.js";
+import asyncHandler from "../utils/asyncHandler.js";
 
-const getErrorStatus = (error) => {
-    const message = error.message || "";
-    if (message.includes("Unauthorized")) return 403;
-    if (message.includes("not found")) return 404;
-    if (message.includes("future") || message.includes("Invalid")) return 400;
-    return 500;
-};
-
-export const createPoll = async (req, res) => {
-    try {
+export const createPoll = asyncHandler(async (req, res) => {
         const userId = req.userId;
         const pollData = req.body;
 
@@ -22,17 +14,9 @@ export const createPoll = async (req, res) => {
             message: "Poll created successfully",
             poll,
         });
-    } catch (error) {
-        console.error("Error creating poll:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const getPollBySlug = async (req, res) => {
-    try {
+export const getPollBySlug = asyncHandler(async (req, res) => {
         const { slug } = req.params;
         const poll = await pollService.getPollBySlug(slug);
 
@@ -61,17 +45,9 @@ export const getPollBySlug = async (req, res) => {
             },
             publicResults,
         });
-    } catch (error) {
-        console.error("Error getting poll:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const getUserPolls = async (req, res) => {
-    try {
+export const getUserPolls = asyncHandler(async (req, res) => {
         const userId = req.userId;
         const polls = await pollService.getUserPolls(userId);
 
@@ -79,17 +55,9 @@ export const getUserPolls = async (req, res) => {
             success: true,
             polls,
         });
-    } catch (error) {
-        console.error("Error getting user polls:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const updatePoll = async (req, res) => {
-    try {
+export const updatePoll = asyncHandler(async (req, res) => {
         const userId = req.userId;
         const { pollId } = req.params;
         const pollData = req.body;
@@ -101,17 +69,9 @@ export const updatePoll = async (req, res) => {
             message: "Poll updated successfully",
             poll,
         });
-    } catch (error) {
-        console.error("Error updating poll:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const publishPoll = async (req, res) => {
-    try {
+export const publishPoll = asyncHandler(async (req, res) => {
         const userId = req.userId;
         const { pollId } = req.params;
 
@@ -125,17 +85,9 @@ export const publishPoll = async (req, res) => {
             message: "Poll published successfully",
             poll,
         });
-    } catch (error) {
-        console.error("Error publishing poll:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const deletePoll = async (req, res) => {
-    try {
+export const deletePoll = asyncHandler(async (req, res) => {
         const userId = req.userId;
         const { pollId } = req.params;
 
@@ -145,17 +97,9 @@ export const deletePoll = async (req, res) => {
             success: true,
             message: "Poll deleted successfully",
         });
-    } catch (error) {
-        console.error("Error deleting poll:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const getPollAnalytics = async (req, res) => {
-    try {
+export const getPollAnalytics = asyncHandler(async (req, res) => {
         const userId = req.userId;
         const { pollId } = req.params;
 
@@ -165,17 +109,9 @@ export const getPollAnalytics = async (req, res) => {
             success: true,
             analytics,
         });
-    } catch (error) {
-        console.error("Error getting analytics:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});
 
-export const getPollResponses = async (req, res) => {
-    try {
+export const getPollResponses = asyncHandler(async (req, res) => {
         const userId = req.userId;
         const { pollId } = req.params;
 
@@ -185,11 +121,4 @@ export const getPollResponses = async (req, res) => {
             success: true,
             responses,
         });
-    } catch (error) {
-        console.error("Error getting responses:", error);
-        return res.status(getErrorStatus(error)).json({
-            success: false,
-            message: error.message || "Internal server error",
-        });
-    }
-};
+});

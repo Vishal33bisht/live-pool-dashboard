@@ -1,6 +1,4 @@
 import { Link, Navigate } from 'react-router-dom'
-import MetricCard from '../components/charts/MetricCard.jsx'
-import ResultBar from '../components/charts/ResultBar.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 
 export default function Home() {
@@ -31,22 +29,17 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-xl shadow-slate-200/70">
-        <div className="grid grid-cols-3 gap-3">
-          <MetricCard label="Responses" value="128" />
-          <MetricCard label="Completion" value="94%" />
-          <MetricCard label="Live" value="3" />
-        </div>
-        <div className="mt-6 rounded-lg border border-slate-200 p-5">
-          <div className="mb-5">
-            <h2 className="text-lg font-bold text-slate-950">Which feature should ship first?</h2>
-            <p className="mt-1 text-sm text-slate-500">Live preview of final results</p>
-          </div>
-          <div className="space-y-4">
-            <ResultBar label="Team analytics" count={64} percentage={50} />
-            <ResultBar label="Public result page" count={41} percentage={32} />
-            <ResultBar label="Expiry automation" count={23} percentage={18} />
-          </div>
+      <div className="rounded-lg border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/70">
+        <h2 className="text-lg font-bold text-slate-950">Poll workflow</h2>
+        <div className="mt-5 space-y-4">
+          {['Create questions with ordered options', 'Share anonymous or authenticated links', 'Track responses and publish results'].map((item, index) => (
+            <div key={item} className="flex gap-3 rounded-md border border-slate-200 p-4">
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-slate-950 text-sm font-bold text-white">
+                {index + 1}
+              </span>
+              <p className="pt-1 text-sm font-semibold text-slate-700">{item}</p>
+            </div>
+          ))}
         </div>
       </div>
     </section>

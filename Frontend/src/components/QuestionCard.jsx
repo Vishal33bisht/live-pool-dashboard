@@ -1,15 +1,20 @@
 import OptionInput from './OptionInput.jsx'
+import { useFieldArray } from 'react-hook-form'
 
 export default function QuestionCard({
-  question,
+  control,
+  register,
   index,
+  questionName,
   canRemove,
-  onQuestionChange,
-  onOptionChange,
-  onAddOption,
-  onRemoveOption,
   onRemoveQuestion,
+  disabled = false,
 }) {
+  const { fields, append, remove } = useFieldArray({
+    control,
+    name: `${questionName}.options`,
+  })
+
   return (
     <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -17,8 +22,8 @@ export default function QuestionCard({
         <label className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700">
           <input
             type="checkbox"
-            checked={question.isMandatory}
-            onChange={(event) => onQuestionChange({ isMandatory: event.target.checked })}
+            {...register(`${questionName}.isMandatory`)}
+            disabled={disabled}
             className="h-4 w-4 accent-slate-950"
           />
           Mandatory
@@ -28,23 +33,24 @@ export default function QuestionCard({
       <label className="block text-sm font-medium text-slate-700">
         Question text
         <input
-          value={question.text}
-          onChange={(event) => onQuestionChange({ text: event.target.value })}
+          {...register(`${questionName}.text`, { required: true, minLength: 3 })}
+          disabled={disabled}
           minLength={3}
           required
-          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
+          className="mt-2 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200 disabled:bg-slate-100"
         />
       </label>
 
       <div className="mt-4 space-y-3">
-        {question.options.map((option, optionIndex) => (
+        {fields.map((option, optionIndex) => (
           <OptionInput
-            key={optionIndex}
-            value={option.text}
+            key={option.id}
+            value={undefined}
+            inputProps={register(`${questionName}.options.${optionIndex}.text`, { required: true, minLength: 1 })}
             index={optionIndex}
-            canRemove={question.options.length > 2}
-            onChange={(value) => onOptionChange(optionIndex, value)}
-            onRemove={() => onRemoveOption(optionIndex)}
+            canRemove={!disabled && fields.length > 2}
+            disabled={disabled}
+            onRemove={() => remove(optionIndex)}
           />
         ))}
       </div>
@@ -52,16 +58,17 @@ export default function QuestionCard({
       <div className="mt-4 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={onAddOption}
-          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+          onClick={() => append({ text: '' })}
+          disabled={disabled}
+          className="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Add option
         </button>
         <button
           type="button"
           onClick={onRemoveQuestion}
-          disabled={!canRemove}
-          className="rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50"
+          disabled={!canRemove || disabled}
+          className="rounded-md border border-red-200 px-3 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Remove question
         </button>

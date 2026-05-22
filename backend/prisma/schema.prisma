@@ -75,13 +75,16 @@ model Response {
   poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
   respondentId String?
   respondent User? @relation(fields: [respondentId], references: [id], onDelete: SetNull)
+  anonymousFingerprint String?
   questionResponses QuestionResponse[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([pollId, respondentId])
+  @@unique([pollId, anonymousFingerprint])
   @@index([pollId])
   @@index([respondentId])
+  @@index([anonymousFingerprint])
 }
 
 model QuestionResponse {
